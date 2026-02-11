@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 
 from telethon import TelegramClient, events
 
@@ -11,8 +12,10 @@ from formatter import format_message
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-userbot = TelegramClient("userbot", config.API_ID, config.API_HASH)
-bot = TelegramClient("bot", config.API_ID, config.API_HASH)
+SESSION_DIR = os.environ.get("SESSION_DIR", ".")
+
+userbot = TelegramClient(os.path.join(SESSION_DIR, "userbot"), config.API_ID, config.API_HASH)
+bot = TelegramClient(os.path.join(SESSION_DIR, "bot"), config.API_ID, config.API_HASH)
 
 
 @userbot.on(events.NewMessage(chats=config.SOURCE_CHANNELS))

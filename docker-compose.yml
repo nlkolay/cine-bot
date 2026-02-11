@@ -1,0 +1,12 @@
+services:
+  cine-bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - SESSION_DIR=/data
+    volumes:
+      - sessions:/data
+
+volumes:
+  sessions:

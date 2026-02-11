@@ -1,0 +1,11 @@
+.env
+.env.example
+*.session
+*.session-journal
+__pycache__/
+.git/
+.claude/
+assets/
+README.md
+LICENSE
+claude_context.txt

@@ -5,3 +5,8 @@ __pycache__/
 *.pyc
 .idea/
 .vscode/
+.claude/
+.claude.json
+.claude.json.backup.*
+*.swp
+claude_context.txt
