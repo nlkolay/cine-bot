@@ -45,27 +45,31 @@ async def _get_imdb_id(session: aiohttp.ClientSession, media_type: str, tmdb_id:
         return data.get("imdb_id") or None
 
 
-async def _search_type(session: aiohttp.ClientSession, title: str, media_type: str) -> MediaResult | None:
-    """Search TMDb for a title in a specific media type."""
-    url = f"{BASE_URL}/search/{media_type}"
-    params = {"api_key": TMDB_API_KEY, "query": title, "language": "en-US", "page": 1}
+async def _search_multi(session: aiohttp.ClientSession, title: str, language: str) -> dict | None:
+    """Run search/multi and return the first movie/tv result."""
+    url = f"{BASE_URL}/search/multi"
+    params = {"api_key": TMDB_API_KEY, "query": title, "language": language, "page": 1}
     async with session.get(url, params=params) as resp:
         if resp.status != 200:
             return None
         data = await resp.json()
 
-    results = data.get("results")
-    if not results:
-        return None
+    for item in data.get("results", []):
+        if item.get("media_type") in ("movie", "tv"):
+            return item
+    return None
 
-    item = results[0]
+
+async def _build_result(session: aiohttp.ClientSession, item: dict) -> MediaResult:
+    """Build a MediaResult from a search/multi item."""
+    media_type = item["media_type"]
     tmdb_id = item["id"]
 
     if media_type == "movie":
-        name = item.get("title", title)
+        name = item.get("original_title") or item.get("title", "")
         date = item.get("release_date", "")
     else:
-        name = item.get("name", title)
+        name = item.get("original_name") or item.get("name", "")
         date = item.get("first_air_date", "")
 
     year = date[:4] if date else ""
@@ -84,9 +88,11 @@ async def _search_type(session: aiohttp.ClientSession, title: str, media_type: s
 
 
 async def search(title: str) -> MediaResult | None:
-    """Search TMDb for a movie first, then TV show."""
+    """Search TMDb using multi search; try ru-RU first, then en-US."""
     async with aiohttp.ClientSession() as session:
-        result = await _search_type(session, title, "movie")
-        if result:
-            return result
-        return await _search_type(session, title, "tv")
+        item = await _search_multi(session, title, "ru-RU")
+        if not item:
+            item = await _search_multi(session, title, "en-US")
+        if not item:
+            return None
+        return await _build_result(session, item)

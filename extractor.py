@@ -14,7 +14,7 @@ def _is_valid_title(text: str) -> bool:
     if text.startswith(("#", "http://", "https://")):
         return False
     word_count = len(text.split())
-    return 2 <= word_count <= 10
+    return 1 <= word_count <= 7
 
 
 def extract_titles(message) -> list[str]:

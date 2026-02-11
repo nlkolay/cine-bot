@@ -6,8 +6,8 @@ from telethon import TelegramClient, events
 
 import config
 from extractor import extract_titles
-from tmdb_client import search
-from formatter import format_message, build_buttons
+from tmdb_client import MediaResult, search
+from formatter import format_result, format_source, build_buttons
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -28,17 +28,38 @@ def _is_allowed(user_id: int) -> bool:
     return not config.ALLOWED_USERS or user_id in config.ALLOWED_USERS
 
 
-async def _process_titles(titles: list[str]):
-    """Search TMDb for each title and return results list."""
-    results = []
+async def _process_titles(titles: list[str]) -> list[MediaResult]:
+    """Search TMDb for each title, deduplicate by tmdb_id."""
+    results: list[MediaResult] = []
+    seen: set[int] = set()
     for title in titles:
         result = await search(title)
         if result:
+            if result.tmdb_id in seen:
+                log.info("Skipping duplicate: %s (%s)", result.title, result.year)
+                continue
+            seen.add(result.tmdb_id)
             results.append(result)
             log.info("Found: %s (%s)", result.title, result.year)
         else:
             log.warning("Not found on TMDb: %s", title)
     return results
+
+
+async def _send_results(results: list[MediaResult], source_text: str = ""):
+    """Send each result as a separate message to the target channel."""
+    if source_text.strip():
+        await bot.send_message(
+            config.TARGET_CHANNEL, format_source(source_text),
+            parse_mode="html", link_preview=False,
+        )
+    for r in results:
+        text = format_result(r)
+        buttons = build_buttons(r)
+        await bot.send_message(
+            config.TARGET_CHANNEL, text, parse_mode="html",
+            link_preview=False, buttons=buttons,
+        )
 
 
 @userbot.on(events.NewMessage(chats=config.SOURCE_CHANNELS))
@@ -54,13 +75,8 @@ async def on_new_post(event):
         return
 
     source_text = event.message.raw_text or ""
-    text = format_message(results, source_text)
-    buttons = build_buttons(results)
-    await bot.send_message(
-        config.TARGET_CHANNEL, text, parse_mode="html",
-        link_preview=False, buttons=buttons,
-    )
-    log.info("Sent message to %s", config.TARGET_CHANNEL)
+    await _send_results(results, source_text)
+    log.info("Sent %d message(s) to %s", len(results), config.TARGET_CHANNEL)
 
 
 @bot.on(events.NewMessage(pattern="/start", func=lambda e: e.is_private))
@@ -85,8 +101,8 @@ async def on_search(event):
         await event.respond(f"Nothing found for: {query}")
         return
 
-    text = format_message([result], "")
-    buttons = build_buttons([result])
+    text = format_result(result)
+    buttons = build_buttons(result)
     await event.respond(text, parse_mode="html", link_preview=False, buttons=buttons)
 
 
@@ -98,6 +114,7 @@ async def on_dm(event):
 
     titles = extract_titles(event.message)
     if not titles:
+        log.info("DM from user %d: no titles extracted from: %s", event.sender_id, (event.raw_text or "")[:120])
         await event.respond("Couldn't find any movie/series titles in that message.")
         return
 
@@ -109,13 +126,7 @@ async def on_dm(event):
         return
 
     source_text = event.message.raw_text or ""
-    text = format_message(results, source_text)
-    buttons = build_buttons(results)
-
-    await bot.send_message(
-        config.TARGET_CHANNEL, text, parse_mode="html",
-        link_preview=False, buttons=buttons,
-    )
+    await _send_results(results, source_text)
     await event.respond(f"Posted {len(results)} result(s) to the channel.")
     log.info("DM: posted %d result(s) to %s", len(results), config.TARGET_CHANNEL)
 
