@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/python-3.11+-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/Telethon-MTProto-green?style=flat-square" alt="Telethon"/>
   <img src="https://img.shields.io/badge/TMDb-API%20v3-01d277?style=flat-square&logo=themoviedatabase&logoColor=white" alt="TMDb"/>
-  <img src="https://img.shields.io/github/license/nlkolay/cine-bot?style=flat-square&color=blue" alt="License"/>
+  <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"/>
 </p>
 
 <p align="center">
@@ -24,8 +24,9 @@
 4. **Bot** (Telethon, bot token) отправляет в целевой канал отформатированное сообщение:
 
 ```
-🎬 The Brutalist (2024)
+💬 ┃ Текст оригинального поста из канала-источника...
 
+🎬 The Brutalist (2024)
 📌 TMDb | IMDb | Trakt.tv
 ```
 

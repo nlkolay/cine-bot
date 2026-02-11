@@ -1,13 +1,18 @@
+from html import escape
+
 from tmdb_client import MediaResult
 
 
-def format_message(results: list[MediaResult]) -> str:
+def format_message(results: list[MediaResult], source_text: str) -> str:
     """Format a list of MediaResult into an HTML message for Telegram."""
-    blocks: list[str] = []
+    parts: list[str] = []
+
+    # Original message from source channel
+    parts.append(f"💬 <blockquote>{escape(source_text.strip())}</blockquote>")
 
     for r in results:
         year_part = f" ({r.year})" if r.year else ""
-        header = f'🎬 <b>{r.title}{year_part}</b>'
+        header = f'🎬 <b>{escape(r.title)}{year_part}</b>'
 
         links = [f'<a href="{r.tmdb_link}">TMDb</a>']
         if r.imdb_link:
@@ -15,6 +20,6 @@ def format_message(results: list[MediaResult]) -> str:
         if r.trakt_link:
             links.append(f'<a href="{r.trakt_link}">Trakt.tv</a>')
 
-        blocks.append(f"{header}\n\n📌 {' | '.join(links)}")
+        parts.append(f"{header}\n📌 {' | '.join(links)}")
 
-    return "\n\n".join(blocks)
+    return "\n\n".join(parts)

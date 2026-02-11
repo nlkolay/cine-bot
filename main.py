@@ -35,7 +35,8 @@ async def on_new_post(event):
     if not results:
         return
 
-    text = format_message(results)
+    source_text = event.message.raw_text or ""
+    text = format_message(results, source_text)
     await bot.send_message(config.TARGET_CHANNEL, text, parse_mode="html", link_preview=False)
     log.info("Sent message to %s", config.TARGET_CHANNEL)
 
