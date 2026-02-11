@@ -5,6 +5,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY config.py extractor.py tmdb_client.py formatter.py main.py ./
+COPY config.py extractor.py tmdb_client.py omdb_client.py formatter.py main.py ./
 
 CMD ["python", "main.py"]

@@ -1,8 +1,9 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import aiohttp
 
 from config import TMDB_API_KEY
+from omdb_client import Ratings, fetch_ratings
 
 BASE_URL = "https://api.themoviedb.org/3"
 
@@ -14,6 +15,7 @@ class MediaResult:
     tmdb_id: int
     imdb_id: str | None
     media_type: str  # "movie" or "tv"
+    ratings: Ratings | None = field(default=None)
 
     @property
     def tmdb_link(self) -> str:
@@ -69,6 +71,7 @@ async def _search_type(session: aiohttp.ClientSession, title: str, media_type: s
     year = date[:4] if date else ""
 
     imdb_id = await _get_imdb_id(session, media_type, tmdb_id)
+    ratings = await fetch_ratings(imdb_id) if imdb_id else None
 
     return MediaResult(
         title=name,
@@ -76,6 +79,7 @@ async def _search_type(session: aiohttp.ClientSession, title: str, media_type: s
         tmdb_id=tmdb_id,
         imdb_id=imdb_id,
         media_type=media_type,
+        ratings=ratings,
     )
 
 
