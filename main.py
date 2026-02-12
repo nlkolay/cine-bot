@@ -5,7 +5,7 @@ import os
 from telethon import TelegramClient, events
 
 import config
-from extractor import extract_titles
+from extractor import TitleContext, extract_titles
 from tmdb_client import MediaResult, search
 from formatter import format_result, format_source, build_buttons
 
@@ -28,12 +28,16 @@ def _is_allowed(user_id: int) -> bool:
     return not config.ALLOWED_USERS or user_id in config.ALLOWED_USERS
 
 
-async def _process_titles(titles: list[str]) -> list[MediaResult]:
-    """Search TMDb for each title, deduplicate by tmdb_id."""
+async def _process_titles(contexts: list[TitleContext]) -> list[MediaResult]:
+    """Search TMDb for each title context, deduplicate by tmdb_id."""
     results: list[MediaResult] = []
     seen: set[int] = set()
-    for title in titles:
-        result = await search(title)
+    for ctx in contexts:
+        log.info(
+            "Searching: %r (year=%s, director=%s)",
+            ctx.title, ctx.year, ctx.director,
+        )
+        result = await search(ctx)
         if result:
             if result.tmdb_id in seen:
                 log.info("Skipping duplicate: %s (%s)", result.title, result.year)
@@ -42,7 +46,7 @@ async def _process_titles(titles: list[str]) -> list[MediaResult]:
             results.append(result)
             log.info("Found: %s (%s)", result.title, result.year)
         else:
-            log.warning("Not found on TMDb: %s", title)
+            log.warning("Not found on TMDb: %s", ctx.title)
     return results
 
 
@@ -96,7 +100,7 @@ async def on_search(event):
         return
 
     log.info("/search from user %d: %s", event.sender_id, query)
-    result = await search(query)
+    result = await search(TitleContext(title=query))
     if not result:
         await event.respond(f"Nothing found for: {query}")
         return

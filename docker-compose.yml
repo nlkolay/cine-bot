@@ -6,7 +6,4 @@ services:
     environment:
       - SESSION_DIR=/data
     volumes:
-      - sessions:/data
-
-volumes:
-  sessions:
+      - ./sessions:/data
