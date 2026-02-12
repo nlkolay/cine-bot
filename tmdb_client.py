@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 
 import aiohttp
-import pymorphy3
 
 from config import TMDB_API_KEY
 from extractor import TitleContext
@@ -11,8 +10,16 @@ BASE_URL = "https://api.themoviedb.org/3"
 
 MIN_STEM_LEN = 4
 
-# Initialize pymorphy3 for Russian text normalization
-morph = pymorphy3.MorphAnalyzer()
+# Lazy-loaded pymorphy3 (heavy import, only needed for Russian titles)
+_morph = None
+
+
+def _get_morph():
+    global _morph
+    if _morph is None:
+        import pymorphy3
+        _morph = pymorphy3.MorphAnalyzer()
+    return _morph
 
 # Common Russian to English movie title mappings for better People API matching
 _TITLE_TRANSLATIONS = {
@@ -27,6 +34,7 @@ def _normalize_title(title: str) -> str:
     """Normalize Russian title to nominative case."""
     # Check if title contains Cyrillic characters
     if any('\u0400' <= c <= '\u04ff' for c in title):
+        morph = _get_morph()
         words = title.split()
         normalized_words = []
         for word in words:
@@ -395,8 +403,9 @@ async def _search_with_context(
             return result
 
     # Collect candidates from movie + tv typed searches
+    langs = ("en-US", "ru-RU") if ctx.is_english else ("ru-RU", "en-US")
     candidates: list[dict] = []
-    for lang in ("ru-RU", "en-US"):
+    for lang in langs:
         for mt in ("movie", "tv"):
             # Try original title
             items = await _search_typed(session, title, mt, lang, year=year, limit=5)
@@ -436,14 +445,16 @@ async def _search_with_context(
     return await _build_result_from_item(session, unique[0])
 
 
-async def _search_plain(session: aiohttp.ClientSession, title: str) -> MediaResult | None:
-    """Original search/multi behavior: ru-RU first, then en-US."""
-    item = await _search_multi(session, title, "ru-RU")
-    if not item:
-        item = await _search_multi(session, title, "en-US")
-    if not item:
-        return None
-    return await _build_result_from_item(session, item)
+async def _search_plain(
+    session: aiohttp.ClientSession, title: str, *, is_english: bool = False,
+) -> MediaResult | None:
+    """search/multi with language priority based on title origin."""
+    langs = ("en-US", "ru-RU") if is_english else ("ru-RU", "en-US")
+    for lang in langs:
+        item = await _search_multi(session, title, lang)
+        if item:
+            return await _build_result_from_item(session, item)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -465,4 +476,4 @@ async def search(ctx: TitleContext) -> MediaResult | None:
                 return result
             # Context search failed — fall back to plain search
 
-        return await _search_plain(session, ctx.title)
+        return await _search_plain(session, ctx.title, is_english=ctx.is_english)
