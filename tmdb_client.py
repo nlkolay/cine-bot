@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 import aiohttp
+import pymorphy3
 
 from config import TMDB_API_KEY
 from extractor import TitleContext
@@ -9,6 +10,46 @@ from omdb_client import Ratings, fetch_ratings
 BASE_URL = "https://api.themoviedb.org/3"
 
 MIN_STEM_LEN = 4
+
+# Initialize pymorphy3 for Russian text normalization
+morph = pymorphy3.MorphAnalyzer()
+
+# Common Russian to English movie title mappings for better People API matching
+_TITLE_TRANSLATIONS = {
+    'одержимый': ['Possession'],
+    'одержимость': ['Possession'],
+    'улыбка': ['Smile'],
+    'вечность': ['Eternity', 'Forever'],
+}
+
+
+def _normalize_title(title: str) -> str:
+    """Normalize Russian title to nominative case."""
+    # Check if title contains Cyrillic characters
+    if any('\u0400' <= c <= '\u04ff' for c in title):
+        words = title.split()
+        normalized_words = []
+        for word in words:
+            parsed = morph.parse(word)[0]
+            normalized_words.append(parsed.normal_form)
+        return ' '.join(normalized_words)
+    return title
+
+
+def _get_title_variants(title: str) -> list[str]:
+    """Get all possible title variants (original, normalized, translations)."""
+    variants = [title]
+    
+    # Add normalized version
+    normalized = _normalize_title(title)
+    if normalized != title:
+        variants.append(normalized)
+    
+    # Add English translations for normalized Russian titles
+    if normalized in _TITLE_TRANSLATIONS:
+        variants.extend(_TITLE_TRANSLATIONS[normalized])
+    
+    return list(dict.fromkeys(variants))  # Remove duplicates while preserving order
 
 
 @dataclass
@@ -130,6 +171,9 @@ async def _search_via_person_api(
     session: aiohttp.ClientSession, title: str, director: str
 ) -> MediaResult | None:
     """Search using People API approach: find person first, then their filmography."""
+    # Get all title variants (original, normalized, translations)
+    title_variants = _get_title_variants(title)
+    
     # 1. Find the person
     person = await _search_person(session, director)
     if not person:
@@ -161,17 +205,19 @@ async def _search_via_person_api(
             seen_ids.add(item["id"])
             unique_items.append(item)
     
-    # 4. Look for fuzzy title match with scoring
+    # 4. Look for fuzzy title match with scoring (try all title variants)
     best_match = None
     best_score = 0
     
     for item in unique_items:
         item_title = item.get("title") or item.get("name", "")
-        if _fuzzy_title_match(title, item_title):
-            score = _title_match_score(title, item_title)
-            if score > best_score:
-                best_score = score
-                best_match = item
+        # Try each title variant
+        for variant in title_variants:
+            if _fuzzy_title_match(variant, item_title):
+                score = _title_match_score(variant, item_title)
+                if score > best_score:
+                    best_score = score
+                    best_match = item
     
     if best_match:
         # Found the best match in their filmography
@@ -339,6 +385,9 @@ async def _search_with_context(
     year = ctx.year
     director = ctx.director
 
+    # Normalize the title for better matching
+    normalized_title = _normalize_title(title)
+
     # If we have a director hint, try the People API approach first
     if director:
         result = await _search_via_person_api(session, title, director)
@@ -349,8 +398,13 @@ async def _search_with_context(
     candidates: list[dict] = []
     for lang in ("ru-RU", "en-US"):
         for mt in ("movie", "tv"):
+            # Try original title
             items = await _search_typed(session, title, mt, lang, year=year, limit=5)
             candidates.extend(items)
+            # If no results, try normalized title
+            if not candidates and normalized_title != title:
+                items = await _search_typed(session, normalized_title, mt, lang, year=year, limit=5)
+                candidates.extend(items)
         if candidates:
             break
 
