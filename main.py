@@ -57,6 +57,7 @@ async def _send_results(results: list[MediaResult], source_text: str = ""):
             config.TARGET_CHANNEL, format_source(source_text),
             parse_mode="html", link_preview=False,
         )
+        await asyncio.sleep(1)
     for r in results:
         text = format_result(r)
         buttons = build_buttons(r)
@@ -64,6 +65,7 @@ async def _send_results(results: list[MediaResult], source_text: str = ""):
             config.TARGET_CHANNEL, text, parse_mode="html",
             link_preview=False, buttons=buttons,
         )
+        await asyncio.sleep(1)
 
 
 @userbot.on(events.NewMessage(chats=config.SOURCE_CHANNELS))
