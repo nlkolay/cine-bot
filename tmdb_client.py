@@ -62,6 +62,126 @@ def _names_match(query_name: str, candidate_name: str) -> bool:
 # TMDb API calls
 # ---------------------------------------------------------------------------
 
+async def _search_person(session: aiohttp.ClientSession, query: str) -> dict | None:
+    """Search for a person by name."""
+    url = f"{BASE_URL}/search/person"
+    params = {"api_key": TMDB_API_KEY, "query": query, "language": "en-US", "page": 1}
+    async with session.get(url, params=params) as resp:
+        if resp.status != 200:
+            return None
+        data = await resp.json()
+    
+    results = data.get("results", [])
+    return results[0] if results else None
+
+
+async def _get_person_combined_credits(session: aiohttp.ClientSession, person_id: int) -> dict | None:
+    """Get combined credits for a person."""
+    url = f"{BASE_URL}/person/{person_id}/combined_credits"
+    params = {"api_key": TMDB_API_KEY, "language": "en-US"}
+    async with session.get(url, params=params) as resp:
+        if resp.status != 200:
+            return None
+        return await resp.json()
+
+
+def _fuzzy_title_match(query_title: str, candidate_title: str) -> bool:
+    """Simple fuzzy title matching using stems."""
+    query_stems = {_stem(w) for w in query_title.lower().split() if len(w) >= MIN_STEM_LEN}
+    candidate_stems = {_stem(w) for w in candidate_title.lower().split() if len(w) >= MIN_STEM_LEN}
+    
+    # Exact match check (case insensitive)
+    if query_title.lower() == candidate_title.lower():
+        return True
+    
+    if not query_stems or not candidate_stems:
+        return False
+    
+    # Consider it a match if at least 50% of query stems are in candidate stems
+    overlap = len(query_stems & candidate_stems)
+    return overlap >= len(query_stems) // 2 or overlap >= len(candidate_stems) // 2
+
+
+def _title_match_score(query_title: str, candidate_title: str) -> int:
+    """Calculate a score for title matching. Higher is better."""
+    q_lower = query_title.lower()
+    c_lower = candidate_title.lower()
+    
+    # Exact match gets highest score
+    if q_lower == c_lower:
+        return 100
+    
+    # Query contains candidate or vice versa
+    if q_lower in c_lower or c_lower in q_lower:
+        return 80
+    
+    # Fuzzy match score based on stem overlap
+    query_stems = {_stem(w) for w in q_lower.split() if len(w) >= MIN_STEM_LEN}
+    candidate_stems = {_stem(w) for w in c_lower.split() if len(w) >= MIN_STEM_LEN}
+    
+    if not query_stems or not candidate_stems:
+        return 0
+    
+    overlap = len(query_stems & candidate_stems)
+    return (overlap * 100) // max(len(query_stems), len(candidate_stems))
+
+
+async def _search_via_person_api(
+    session: aiohttp.ClientSession, title: str, director: str
+) -> MediaResult | None:
+    """Search using People API approach: find person first, then their filmography."""
+    # 1. Find the person
+    person = await _search_person(session, director)
+    if not person:
+        return None
+    
+    # 2. Get their combined credits
+    credits = await _get_person_combined_credits(session, person["id"])
+    if not credits:
+        return None
+    
+    # 3. Look for fuzzy title match in their filmography (both cast and crew)
+    all_items = []
+    
+    # Add cast items
+    for item in credits.get("cast", []):
+        if item.get("media_type") in ("movie", "tv"):
+            all_items.append(item)
+    
+    # Add crew items (directors, writers, etc.)
+    for item in credits.get("crew", []):
+        if item.get("media_type") in ("movie", "tv"):
+            all_items.append(item)
+    
+    # Deduplicate by ID
+    seen_ids = set()
+    unique_items = []
+    for item in all_items:
+        if item["id"] not in seen_ids:
+            seen_ids.add(item["id"])
+            unique_items.append(item)
+    
+    # 4. Look for fuzzy title match with scoring
+    best_match = None
+    best_score = 0
+    
+    for item in unique_items:
+        item_title = item.get("title") or item.get("name", "")
+        if _fuzzy_title_match(title, item_title):
+            score = _title_match_score(title, item_title)
+            if score > best_score:
+                best_score = score
+                best_match = item
+    
+    if best_match:
+        # Found the best match in their filmography
+        details = await _get_details(session, best_match["media_type"], best_match["id"])
+        if details:
+            return await _build_result_from_details(session, details, best_match["media_type"])
+    
+    return None
+
+
 async def _search_multi(session: aiohttp.ClientSession, title: str, language: str) -> dict | None:
     """Run search/multi and return the first movie/tv result."""
     url = f"{BASE_URL}/search/multi"
@@ -219,6 +339,12 @@ async def _search_with_context(
     year = ctx.year
     director = ctx.director
 
+    # If we have a director hint, try the People API approach first
+    if director:
+        result = await _search_via_person_api(session, title, director)
+        if result:
+            return result
+
     # Collect candidates from movie + tv typed searches
     candidates: list[dict] = []
     for lang in ("ru-RU", "en-US"):
@@ -240,7 +366,7 @@ async def _search_with_context(
             seen.add(key)
             unique.append(item)
 
-    # If we have a director hint, verify against credits (top 3 candidates)
+    # If we have a director hint, verify against credits (top 3 candidates) as fallback
     if director:
         for item in unique[:3]:
             details = await _get_details(session, item["media_type"], item["id"])
