@@ -119,10 +119,24 @@ async def on_dm(event):
         return
 
     titles = extract_titles(event.message)
+    
+    # If no titles extracted (no quotes), treat the entire message as a search query
     if not titles:
-        log.info("DM from user %d: no titles extracted from: %s", event.sender_id, (event.raw_text or "")[:120])
-        await event.respond("Couldn't find any movie/series titles in that message.")
-        return
+        query = event.raw_text.strip()
+        if query:
+            log.info("DM from user %d: direct search for: %s", event.sender_id, query[:120])
+            result = await search(TitleContext(title=query))
+            if result:
+                text = format_result(result)
+                buttons = build_buttons(result)
+                await event.respond(text, parse_mode="html", link_preview=False, buttons=buttons)
+                await event.respond(f"Posted to channel: {config.TARGET_CHANNEL}")
+            else:
+                await event.respond(f"Nothing found for: {query}")
+            return
+        else:
+            await event.respond("Send me a movie or series title to search.")
+            return
 
     log.info("DM from user %d, titles: %s", event.sender_id, titles)
 
