@@ -7,6 +7,7 @@ from telethon import TelegramClient, events
 import config
 from extractor import TitleContext, extract_titles, extract_titles_smart
 from llm_client import GeminiProvider
+from arr_client import add_to_radarr, add_to_sonarr
 from tmdb_client import MediaResult, search
 from formatter import format_result, build_buttons
 
@@ -246,6 +247,50 @@ async def on_dm(event):
     else:
         await _send_results_to_dm(results, event)
         log.info("DM: sent %d result(s) to user %d", len(results), event.sender_id)
+
+
+# ---------------------------------------------------------------------------
+# Callback handlers
+# ---------------------------------------------------------------------------
+
+@bot.on(events.CallbackQuery(pattern=b"grab:"))
+async def on_grab(event):
+    if not _is_allowed(event.sender_id):
+        await event.answer("Access denied.")
+        return
+
+    parts = event.data.decode().split(":")
+    # grab:{media_type}:{tmdb_id}:{tvdb_id}
+    if len(parts) != 4:
+        await event.answer("Invalid callback data")
+        return
+
+    _, media_type, tmdb_id_str, tvdb_id_str = parts
+
+    # Acknowledge immediately so Telegram doesn't timeout
+    await event.answer()
+
+    # Extract title from message text: "🎬 <b>Title (Year)</b>"
+    msg = await event.get_message()
+    title = ""
+    if msg and msg.raw_text:
+        first_line = msg.raw_text.split("\n")[0]
+        # Strip leading emoji and whitespace, remove trailing "(Year)"
+        first_line = first_line.lstrip("\U0001f3ac ").strip()
+        if first_line.endswith(")") and "(" in first_line:
+            first_line = first_line[:first_line.rfind("(")].strip()
+        title = first_line
+
+    if media_type == "movie":
+        result = await add_to_radarr(int(tmdb_id_str), title)
+    else:
+        tvdb_id = int(tvdb_id_str)
+        if not tvdb_id:
+            await event.respond("No TVDB ID available")
+            return
+        result = await add_to_sonarr(tvdb_id, title)
+
+    await event.respond(result)
 
 
 # ---------------------------------------------------------------------------

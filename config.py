@@ -16,5 +16,10 @@ _target = os.environ["TARGET_CHANNEL"]
 TARGET_CHANNEL: int | str = int(_target) if _target.lstrip("-").isdigit() else _target
 SOURCE_CHANNELS = [ch.strip() for ch in os.environ["SOURCE_CHANNELS"].split(",") if ch.strip()]
 
+RADARR_URL = os.environ.get("RADARR_URL", "")
+RADARR_API_KEY = os.environ.get("RADARR_API_KEY", "")
+SONARR_URL = os.environ.get("SONARR_URL", "")
+SONARR_API_KEY = os.environ.get("SONARR_API_KEY", "")
+
 _allowed = os.environ.get("ALLOWED_USERS", "")
 ALLOWED_USERS: set[int] = {int(uid.strip()) for uid in _allowed.split(",") if uid.strip()}
