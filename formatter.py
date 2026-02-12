@@ -45,5 +45,5 @@ def build_buttons(r: MediaResult) -> list[list[KeyboardButtonUrl]]:
     if r.imdb_link:
         row.append(KeyboardButtonUrl(text="IMDb", url=r.imdb_link))
     if r.trakt_link:
-        row.append(KeyboardButtonUrl(text="🔴 Watchlist", url=r.trakt_link))
+        row.append(KeyboardButtonUrl(text="🩷 Watchlist", url=r.trakt_link))
     return [row]

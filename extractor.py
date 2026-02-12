@@ -1,7 +1,16 @@
+from __future__ import annotations
+
+import logging
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from telethon.tl.types import MessageEntityBold
+
+if TYPE_CHECKING:
+    from llm_client import LLMProvider
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -9,6 +18,7 @@ class TitleContext:
     title: str
     year: int | None = None
     director: str | None = None
+    is_english: bool = False
 
 
 _QUOTE_PATTERN = re.compile(
@@ -106,3 +116,32 @@ def extract_titles(message) -> list[TitleContext]:
                     contexts.append(TitleContext(title=candidate))
 
     return contexts
+
+
+async def extract_titles_smart(
+    message, llm: LLMProvider | None = None,
+) -> list[TitleContext]:
+    """LLM-first extraction with regex fallback."""
+    text = message.raw_text or ""
+    if not text.strip():
+        return []
+
+    if llm is not None:
+        try:
+            items = await llm.extract_titles(text)
+            if items:
+                contexts = [
+                    TitleContext(
+                        title=item["title"],
+                        year=item.get("year"),
+                        director=item.get("director"),
+                        is_english=True,
+                    )
+                    for item in items
+                ]
+                log.info("LLM extracted %d title(s): %s", len(contexts), contexts)
+                return contexts
+        except Exception:
+            log.exception("LLM extraction failed, falling back to regex")
+
+    return extract_titles(message)

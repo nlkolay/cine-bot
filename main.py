@@ -5,9 +5,10 @@ import os
 from telethon import TelegramClient, events
 
 import config
-from extractor import TitleContext, extract_titles
+from extractor import TitleContext, extract_titles, extract_titles_smart
+from llm_client import GeminiProvider
 from tmdb_client import MediaResult, search
-from formatter import format_result, format_source, build_buttons
+from formatter import format_result, build_buttons
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -16,6 +17,10 @@ SESSION_DIR = os.environ.get("SESSION_DIR", ".")
 
 userbot = TelegramClient(os.path.join(SESSION_DIR, "userbot"), config.API_ID, config.API_HASH)
 bot = TelegramClient(os.path.join(SESSION_DIR, "bot"), config.API_ID, config.API_HASH)
+
+llm = GeminiProvider(config.GEMINI_API_KEY, config.GEMINI_MODEL) if config.GEMINI_API_KEY else None
+if llm:
+    log.info("LLM extraction enabled (model=%s)", config.GEMINI_MODEL)
 
 START_TEXT = (
     "Hi! Forward me a message with movie/series titles, "
@@ -50,14 +55,8 @@ async def _process_titles(contexts: list[TitleContext]) -> list[MediaResult]:
     return results
 
 
-async def _send_results(results: list[MediaResult], source_text: str = ""):
-    """Send each result as a separate message to the target channel."""
-    if source_text.strip():
-        await bot.send_message(
-            config.TARGET_CHANNEL, format_source(source_text),
-            parse_mode="html", link_preview=False,
-        )
-        await asyncio.sleep(1)
+async def _post_results_to_channel(results: list[MediaResult]):
+    """Send result cards to the target channel."""
     for r in results:
         text = format_result(r)
         buttons = build_buttons(r)
@@ -68,9 +67,57 @@ async def _send_results(results: list[MediaResult], source_text: str = ""):
         await asyncio.sleep(1)
 
 
+async def _send_results_to_dm(results: list[MediaResult], event):
+    """Send results directly back to the user in DM."""
+    for r in results:
+        text = format_result(r)
+        buttons = build_buttons(r)
+        await event.respond(text, parse_mode="html", link_preview=False, buttons=buttons)
+
+
+def _get_album_text(messages) -> str:
+    """Get caption text from album messages (usually on the first one)."""
+    for msg in messages:
+        if msg.raw_text:
+            return msg.raw_text
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# Source channel handlers
+# ---------------------------------------------------------------------------
+
+@userbot.on(events.Album(chats=config.SOURCE_CHANNELS))
+async def on_channel_album(event):
+    """Handle album posts from source channels."""
+    text = _get_album_text(event.messages)
+    if not text:
+        return
+
+    titles = await extract_titles_smart(event.messages[0], llm)
+    if not titles:
+        return
+
+    log.info("Channel album, titles: %s", titles)
+
+    results = await _process_titles(titles)
+    if not results:
+        return
+
+    # Forward entire album, then post results
+    await userbot.forward_messages(config.TARGET_CHANNEL, event.messages)
+    await asyncio.sleep(1)
+    await _post_results_to_channel(results)
+    log.info("Sent %d result(s) to %s (album)", len(results), config.TARGET_CHANNEL)
+
+
 @userbot.on(events.NewMessage(chats=config.SOURCE_CHANNELS))
 async def on_new_post(event):
-    titles = extract_titles(event.message)
+    # Skip grouped messages — handled by on_channel_album
+    if event.message.grouped_id:
+        return
+
+    titles = await extract_titles_smart(event.message, llm)
     if not titles:
         return
 
@@ -80,10 +127,15 @@ async def on_new_post(event):
     if not results:
         return
 
-    source_text = event.message.raw_text or ""
-    await _send_results(results, source_text)
+    await userbot.forward_messages(config.TARGET_CHANNEL, event.message)
+    await asyncio.sleep(1)
+    await _post_results_to_channel(results)
     log.info("Sent %d message(s) to %s", len(results), config.TARGET_CHANNEL)
 
+
+# ---------------------------------------------------------------------------
+# Bot DM handlers
+# ---------------------------------------------------------------------------
 
 @bot.on(events.NewMessage(pattern="/start", func=lambda e: e.is_private))
 async def on_start(event):
@@ -112,15 +164,56 @@ async def on_search(event):
     await event.respond(text, parse_mode="html", link_preview=False, buttons=buttons)
 
 
+@bot.on(events.Album(func=lambda e: e.is_private))
+async def on_dm_album(event):
+    """Handle forwarded albums in DM."""
+    if not _is_allowed(event.messages[0].sender_id):
+        await event.reply("Access denied.")
+        return
+
+    is_forward = event.messages[0].fwd_from is not None
+    text = _get_album_text(event.messages)
+    if not text:
+        return
+
+    titles = await extract_titles_smart(event.messages[0], llm)
+    if not titles:
+        return
+
+    log.info("DM album from user %d, titles: %s (forward=%s)",
+             event.messages[0].sender_id, titles, is_forward)
+
+    results = await _process_titles(titles)
+    if not results:
+        await event.reply("Nothing found on TMDb for the extracted titles.")
+        return
+
+    if is_forward:
+        await bot.forward_messages(config.TARGET_CHANNEL, event.messages)
+        await asyncio.sleep(1)
+        await _post_results_to_channel(results)
+        await event.reply(f"Posted {len(results)} result(s) to the channel.")
+        log.info("DM album forward: posted %d result(s) to %s", len(results), config.TARGET_CHANNEL)
+    else:
+        await _send_results_to_dm(results, event)
+        log.info("DM album: sent %d result(s) to user", len(results))
+
+
 @bot.on(events.NewMessage(func=lambda e: e.is_private and not e.raw_text.startswith("/")))
 async def on_dm(event):
+    # Skip grouped messages — handled by on_dm_album
+    if event.message.grouped_id:
+        return
+
     if not _is_allowed(event.sender_id):
         await event.respond("Access denied.")
         return
 
-    titles = extract_titles(event.message)
-    
-    # If no titles extracted (no quotes), treat the entire message as a search query
+    is_forward = event.message.fwd_from is not None
+
+    titles = await extract_titles_smart(event.message, llm)
+
+    # If no titles extracted, treat as search query
     if not titles:
         query = event.raw_text.strip()
         if query:
@@ -137,18 +230,27 @@ async def on_dm(event):
             await event.respond("Send me a movie or series title to search.")
             return
 
-    log.info("DM from user %d, titles: %s", event.sender_id, titles)
+    log.info("DM from user %d, titles: %s (forward=%s)", event.sender_id, titles, is_forward)
 
     results = await _process_titles(titles)
     if not results:
         await event.respond("Nothing found on TMDb for the extracted titles.")
         return
 
-    source_text = event.message.raw_text or ""
-    await _send_results(results, source_text)
-    await event.respond(f"Posted {len(results)} result(s) to the channel.")
-    log.info("DM: posted %d result(s) to %s", len(results), config.TARGET_CHANNEL)
+    if is_forward:
+        await bot.forward_messages(config.TARGET_CHANNEL, event.message)
+        await asyncio.sleep(1)
+        await _post_results_to_channel(results)
+        await event.respond(f"Posted {len(results)} result(s) to the channel.")
+        log.info("DM forward: posted %d result(s) to %s", len(results), config.TARGET_CHANNEL)
+    else:
+        await _send_results_to_dm(results, event)
+        log.info("DM: sent %d result(s) to user %d", len(results), event.sender_id)
 
+
+# ---------------------------------------------------------------------------
+# Auth & startup
+# ---------------------------------------------------------------------------
 
 CODE_FILE = os.path.join(SESSION_DIR, "auth_code.txt")
 
