@@ -130,7 +130,6 @@ async def on_dm(event):
                 text = format_result(result)
                 buttons = build_buttons(result)
                 await event.respond(text, parse_mode="html", link_preview=False, buttons=buttons)
-                await event.respond(f"Posted to channel: {config.TARGET_CHANNEL}")
             else:
                 await event.respond(f"Nothing found for: {query}")
             return
