@@ -1,6 +1,6 @@
 from html import escape
 
-from telethon.tl.types import KeyboardButtonUrl
+from telethon.tl.types import KeyboardButtonCallback, KeyboardButtonUrl
 
 from tmdb_client import MediaResult
 
@@ -38,12 +38,14 @@ def format_source(source_text: str) -> str:
     return f"\U0001f4ac \u2503 <blockquote>{escape(source_text.strip())}</blockquote>"
 
 
-def build_buttons(r: MediaResult) -> list[list[KeyboardButtonUrl]]:
-    """Build inline URL button row for a single result."""
-    row: list[KeyboardButtonUrl] = []
-    row.append(KeyboardButtonUrl(text="TMDb", url=r.tmdb_link))
+def build_buttons(r: MediaResult) -> list[list]:
+    """Build inline button row: IMDb (url), Trakt (url), Grab (callback)."""
+    row: list = []
     if r.imdb_link:
         row.append(KeyboardButtonUrl(text="IMDb", url=r.imdb_link))
     if r.trakt_link:
-        row.append(KeyboardButtonUrl(text="🩷 Watchlist", url=r.trakt_link))
+        row.append(KeyboardButtonUrl(text="Trakt", url=r.trakt_link))
+    tvdb = r.tvdb_id or 0
+    data = f"grab:{r.media_type}:{r.tmdb_id}:{tvdb}"
+    row.append(KeyboardButtonCallback(text="\U0001fa77 Grab", data=data.encode()))
     return [row]

@@ -66,6 +66,7 @@ class MediaResult:
     year: str
     tmdb_id: int
     imdb_id: str | None
+    tvdb_id: int | None
     media_type: str  # "movie" or "tv"
     ratings: Ratings | None = field(default=None)
 
@@ -318,6 +319,13 @@ def _extract_imdb_id(details: dict) -> str | None:
     return ext.get("imdb_id") or None
 
 
+def _extract_tvdb_id(details: dict) -> int | None:
+    """Extract tvdb_id from details with appended external_ids."""
+    ext = details.get("external_ids", {})
+    tvdb = ext.get("tvdb_id")
+    return int(tvdb) if tvdb else None
+
+
 # ---------------------------------------------------------------------------
 # Result building
 # ---------------------------------------------------------------------------
@@ -331,8 +339,10 @@ async def _build_result_from_item(session: aiohttp.ClientSession, item: dict) ->
 
     if details:
         imdb_id = _extract_imdb_id(details)
+        tvdb_id = _extract_tvdb_id(details)
     else:
         imdb_id = None
+        tvdb_id = None
 
     if media_type == "movie":
         name = item.get("original_title") or item.get("title", "")
@@ -349,6 +359,7 @@ async def _build_result_from_item(session: aiohttp.ClientSession, item: dict) ->
         year=year,
         tmdb_id=tmdb_id,
         imdb_id=imdb_id,
+        tvdb_id=tvdb_id,
         media_type=media_type,
         ratings=ratings,
     )
@@ -360,6 +371,7 @@ async def _build_result_from_details(
     """Build a MediaResult from already-fetched details dict."""
     tmdb_id = details["id"]
     imdb_id = _extract_imdb_id(details)
+    tvdb_id = _extract_tvdb_id(details)
 
     if media_type == "movie":
         name = details.get("original_title") or details.get("title", "")
@@ -376,6 +388,7 @@ async def _build_result_from_details(
         year=year,
         tmdb_id=tmdb_id,
         imdb_id=imdb_id,
+        tvdb_id=tvdb_id,
         media_type=media_type,
         ratings=ratings,
     )
