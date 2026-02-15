@@ -119,16 +119,17 @@ def extract_titles(message) -> list[TitleContext]:
 
 
 async def extract_titles_smart(
-    message, llm: LLMProvider | None = None,
+    message, llm: LLMProvider | None = None, *,
+    images: list[bytes] | None = None, source: str = "dm",
 ) -> list[TitleContext]:
     """LLM-first extraction with regex fallback."""
     text = message.raw_text or ""
-    if not text.strip():
+    if not text.strip() and not images:
         return []
 
     if llm is not None:
         try:
-            items = await llm.extract_titles(text)
+            items = await llm.extract_titles(text, images=images, source=source)
             if items:
                 contexts = [
                     TitleContext(
@@ -144,4 +145,6 @@ async def extract_titles_smart(
         except Exception:
             log.exception("LLM extraction failed, falling back to regex")
 
-    return extract_titles(message)
+    if text.strip():
+        return extract_titles(message)
+    return []

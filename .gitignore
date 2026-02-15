@@ -10,3 +10,7 @@ __pycache__/
 .claude.json.backup.*
 *.swp
 claude_context.txt
+settings.json
+cie-ocr-2026-02-15.txt
+bot_output.log
+CLAUDE.md
