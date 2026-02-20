@@ -21,5 +21,13 @@ RADARR_API_KEY = os.environ.get("RADARR_API_KEY", "")
 SONARR_URL = os.environ.get("SONARR_URL", "")
 SONARR_API_KEY = os.environ.get("SONARR_API_KEY", "")
 
+SESSION_DIR = os.environ.get("SESSION_DIR", ".")
+
 _allowed = os.environ.get("ALLOWED_USERS", "")
 ALLOWED_USERS: set[int] = {int(uid.strip()) for uid in _allowed.split(",") if uid.strip()}
+
+_admins = os.environ.get("ADMIN_USERS", "")
+ADMIN_USERS: set[int] = (
+    {int(uid.strip()) for uid in _admins.split(",") if uid.strip()}
+    if _admins.strip() else ALLOWED_USERS
+)
