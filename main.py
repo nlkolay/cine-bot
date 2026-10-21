@@ -1,3 +1,4 @@
+#main.py - Telegram bot and userbot for TMDb title extraction and posting
 import asyncio
 import logging
 import os
